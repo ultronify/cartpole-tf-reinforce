@@ -7,6 +7,20 @@ from tensorflow.keras.layers import Dense
 from tensorflow.python.keras.backend import dtype
 
 
+def eval(model, env, max_eps, action_space_size):
+  total_reward = 0.0
+  for _ in range(max_eps):
+    done = False
+    state = env.reset()
+    while not done:
+      action_prob = model(tf.convert_to_tensor([state]))
+      action = sample_action(action_prob, action_space_size)
+      state, reward, done, _ = env.step(action)
+      total_reward += reward
+  avg_reward = total_reward / max_eps
+  return avg_reward
+
+
 def build_model(state_space_size, action_space_size):
     policy_network = Sequential()
     policy_network.add(
@@ -39,8 +53,9 @@ def normalize_discounted_rewards(discounted_rewards):
     return normalized_discounted_rewards
 
 
-def train(max_eps=1):
+def train(max_eps=6000):
     env = gym.make('CartPole-v0')
+    eval_env = gym.make('CartPole-v0')
     state_space_size = env.observation_space.shape[0]
     action_space_size = env.action_space.n
     print('action space size is {0}, state space size is {1}'.format(
@@ -64,21 +79,22 @@ def train(max_eps=1):
                 action_probs.append(action_prob[0])
                 actions.append(action)
                 state = next_state
-        discounted_rewards = compute_discounted_rewards(rewards, gamma)
-        normalized_discounted_rewards = tf.convert_to_tensor(
-            normalize_discounted_rewards(discounted_rewards), dtype=tf.float32)
-        probs = tf.stack(action_probs)
-        clipped_probs = tf.clip_by_value(probs, 1e-8, 1.0 - 1e-8)
-        onehot_actions = tf.one_hot(
-            actions, action_space_size, dtype=tf.float32)
-        log_likelihood = tf.multiply(
-            onehot_actions, tf.math.log(clipped_probs))
-        loss = tf.math.reduce_sum(
-            tf.multiply(-log_likelihood, tf.expand_dims(normalized_discounted_rewards, axis=1)))
+            discounted_rewards = compute_discounted_rewards(rewards, gamma)
+            normalized_discounted_rewards = tf.convert_to_tensor(
+                normalize_discounted_rewards(discounted_rewards), dtype=tf.float32)
+            probs = tf.stack(action_probs)
+            clipped_probs = tf.clip_by_value(probs, 1e-8, 1.0 - 1e-8)
+            onehot_actions = tf.one_hot(
+                actions, action_space_size, dtype=tf.float32)
+            log_likelihood = tf.multiply(
+                onehot_actions, tf.math.log(clipped_probs))
+            loss = tf.math.reduce_sum(
+                tf.multiply(-log_likelihood, tf.expand_dims(normalized_discounted_rewards, axis=1)))
         policy_gradients = tape.gradient(loss, model.trainable_weights)
         optimizer.apply_gradients(
             zip(policy_gradients, model.trainable_weights))
-        print('Done {0}'.format(eps))
+        score = eval(model, eval_env, 10, action_space_size)
+        print('Done {0}/{1} with score {2}'.format(eps, max_eps, score))
 
 
 train()
