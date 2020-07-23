@@ -1,41 +1,21 @@
-from typing import List
 import numpy as np
 import tensorflow as tf
 import gym
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
-from tensorflow.python.keras.backend import dtype
+from util import sample_action, build_model
 
 
 def eval(model, env, max_eps, action_space_size):
-  total_reward = 0.0
-  for _ in range(max_eps):
-    done = False
-    state = env.reset()
-    while not done:
-      action_prob = model(tf.convert_to_tensor([state]))
-      action = sample_action(action_prob, action_space_size)
-      state, reward, done, _ = env.step(action)
-      total_reward += reward
-  avg_reward = total_reward / max_eps
-  return avg_reward
-
-
-def build_model(state_space_size, action_space_size):
-    policy_network = Sequential()
-    policy_network.add(
-        Dense(units=64, input_dim=state_space_size, activation='relu', kernel_initializer='he_uniform'))
-    policy_network.add(Dense(units=32, activation='relu',
-                             kernel_initializer='he_uniform'))
-    policy_network.add(
-        Dense(units=action_space_size, activation='softmax'))
-    return policy_network
-
-
-def sample_action(probs, action_space_size):
-    prob = np.array(probs[0])
-    prob /= prob.sum()
-    return np.random.choice(action_space_size, p=prob)
+    total_reward = 0.0
+    for _ in range(max_eps):
+        done = False
+        state = env.reset()
+        while not done:
+            action_prob = model(tf.convert_to_tensor([state]))
+            action = sample_action(action_prob, action_space_size)
+            state, reward, done, _ = env.step(action)
+            total_reward += reward
+    avg_reward = total_reward / max_eps
+    return avg_reward
 
 
 def compute_discounted_rewards(rewards, gamma):
@@ -63,7 +43,8 @@ def train(max_eps=6000):
     model = build_model(state_space_size, action_space_size)
     model.summary()
     gamma = 0.9
-    optimizer = tf.optimizers.Adam(learning_rate=0.01)
+    optimizer = tf.optimizers.Adam(learning_rate=0.001)
+    best_score = 0.0
     for eps in range(max_eps):
         done = False
         state = env.reset()
@@ -72,7 +53,8 @@ def train(max_eps=6000):
         actions = []
         with tf.GradientTape() as tape:
             while not done:
-                action_prob = model(tf.convert_to_tensor([state]))
+                state_tensor = tf.convert_to_tensor([state], dtype=tf.float32)
+                action_prob = model(state_tensor)
                 action = sample_action(action_prob, action_space_size)
                 next_state, reward, done, _ = env.step(action)
                 rewards.append(reward)
@@ -94,7 +76,13 @@ def train(max_eps=6000):
         optimizer.apply_gradients(
             zip(policy_gradients, model.trainable_weights))
         score = eval(model, eval_env, 10, action_space_size)
-        print('Done {0}/{1} with score {2}'.format(eps, max_eps, score))
+        if score >= best_score:
+            best_score = score
+            tf.saved_model.save(model, './best_model')
+        print(
+            'Finished episode {0}/{1} with score {2}'.format(eps, max_eps, score))
+    env.close()
+    eval_env.close()
 
-
-train()
+if __name__ == '__main__':
+    train()
